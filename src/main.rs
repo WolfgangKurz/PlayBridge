@@ -1,5 +1,5 @@
 #![allow(non_snake_case)]
-use std::{env, mem, io::*, time::Duration};
+use std::{env, mem, io::*, time::Duration, time::SystemTime};
 use image::{DynamicImage, RgbaImage, codecs::png::PngEncoder, imageops::FilterType};
 use windows::{
 	core::*, Win32::{Foundation::*, Graphics::Gdi::*, Storage::Xps::*, UI::HiDpi::*, UI::WindowsAndMessaging::*}
@@ -8,7 +8,6 @@ use windows::{
 const TITLE: PCWSTR = w!("명일방주");
 const WIDTH: f32 = 1280.0;
 const HEIGHT: f32 = 720.0;
-const POLL: i32 = 1000 / 250;
 
 fn main() {
 	unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).unwrap() };
@@ -85,29 +84,35 @@ fn input_tap(x: i32, y: i32) {
 fn input_swipe(x1: i32, y1: i32, x2: i32, y2: i32, dur: i32) {
 	let (hwnd, w, h) = get_gpg_info();
 
-	let time = dur as f32 / POLL as f32;
-	let ends = time.floor() as i32;
+	let duration = dur / 5; // adjust duration
+	let sleep_ms = 10;
 
-	let dx = ((x2 - x1) as f32) / time;
-	let dy = ((y2 - y1) as f32) / time;
+	let begin = SystemTime::now();
 
 	unsafe {
-		let mut cnt = 0;
 		loop {
-			if cnt >= ends {
-				break;
+			match begin.elapsed() {
+				Ok(elapsed) => {
+					let el = elapsed.as_millis() as f32 / duration as f32;
+
+					if el >= 1.0 {
+						break;
+					}
+
+					let nx = x1 + ((x2 - x1) as f32 * el) as i32;
+					let ny = y1 + ((y2 - y1) as f32 * el) as i32;
+					let pos = get_relative_point(nx, ny, w, h);
+					_ = PostMessageA(hwnd, WM_LBUTTONDOWN, WPARAM(1), LPARAM(pos));
+
+					spin_sleep::sleep(Duration::from_millis(sleep_ms as u64));
+				}
+				Err(_e)  => {
+					break;
+				}
 			}
-
-			let nx = x1 + (dx * cnt as f32) as i32;
-			let ny = y1 + (dy * cnt as f32) as i32;
-			let pos = get_relative_point(nx, ny, w, h);
-
-			_ = PostMessageA(hwnd, WM_LBUTTONDOWN, WPARAM(1), LPARAM(pos));
-			
-			spin_sleep::sleep(Duration::new(0, POLL as u32 * 1000000));
-			cnt += 1;
 		}
 
+		// post end position up
 		let pos = get_relative_point(x2, y2, w, h);
 		_ = PostMessageA(hwnd, WM_LBUTTONUP, WPARAM(1), LPARAM(pos));
 	}
