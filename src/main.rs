@@ -1,11 +1,21 @@
 #![allow(non_snake_case)]
-use std::{env, mem, io::*, time::Duration, time::SystemTime};
+use chrono::offset::Local;
+use once_cell::sync::Lazy;
+use std::{env, fs::OpenOptions, io::*, iter, mem, time::{Duration, SystemTime}};
 use image::{DynamicImage, RgbaImage, codecs::png::PngEncoder, imageops::FilterType};
 use windows::{
 	core::*, Win32::{Foundation::*, Graphics::Gdi::*, Storage::Xps::*, UI::HiDpi::*, UI::WindowsAndMessaging::*}
 };
 
-const TITLE: PCWSTR = w!("명일방주"); // Note: Rename the title you want to interact with.
+const TITLE: Lazy<PCWSTR> = Lazy::new(|| {
+	let var = env::var("PLAYBRIDGE_TITLE").unwrap_or(String::from("명일방주"));
+	let vec: Vec<u16> = var.encode_utf16().chain(iter::once(0)).collect::<Vec<_>>();
+
+	PCWSTR::from_raw(vec.as_ptr())
+});
+const QUICK: Lazy<bool> = Lazy::new(|| env::var("PLAYBRIDGE_QUICK").is_ok());
+const DEBUG: Lazy<bool> = Lazy::new(|| env::var("PLAYBRIDGE_DEBUG").is_ok());
+
 const CLASS: PCWSTR = w!("CROSVM_1"); // Note: Warning. May cause problems in the future.
 const WIDTH: f32 = 1280.0;
 const HEIGHT: f32 = 720.0;
@@ -15,12 +25,13 @@ fn main() {
 
 	let args: Vec<String> = env::args().collect();
 	let command = args.join(" ");
+	let timestamp = Local::now().format("%Y-%m-%d %H.%M.%S_%3f").to_string();
 
 	if command.contains("connect") {
 		println!("connected to Google Play Games Beta");
 	} else if command.contains("devices") {
 		println!("List of devices attached");
-		if unsafe { FindWindowW(CLASS, TITLE) } != HWND(0) {
+		if !unsafe { FindWindowW(CLASS, *TITLE) }.unwrap().is_invalid() {
 			println!("GooglePlayGamesBeta\tdevice")
 		}
 	} else if command.contains("shell getprop ro.build.version.release") {
@@ -29,7 +40,7 @@ fn main() {
 		let intent = args[7].parse::<String>().unwrap();
 		let package = intent.split("/").next().unwrap();
 
-		if unsafe { FindWindowW(CLASS, TITLE) } == HWND(0) {
+		if unsafe { FindWindowW(CLASS, *TITLE) }.unwrap().is_invalid() {
 			_ = open::that(format!("googleplaygames://launch/?id={}", package));
 		}
 		
@@ -50,7 +61,7 @@ fn main() {
 		input_swipe(x1, y1, x2, y2, dur);
 	} else if command.contains("input keyevent 111") {
 		input_keyevent(0x01);
-	} else if command.contains("dumpsys window displays") {
+	} else if command.contains("dumpsys window displays") || command.contains("wm size") {
 		println!("{}", WIDTH as i32);
 		println!("{}", HEIGHT as i32);
 	} else if command.contains("exec-out screencap -p") {
@@ -58,13 +69,26 @@ fn main() {
 
 		let mut stdout = stdout().lock();
 		image.write_with_encoder(PngEncoder::new(&mut stdout)).unwrap();
+
+		if *DEBUG {
+			let file = format!("playbridge_debug/{}.png", timestamp);
+			let path = std::path::Path::new(&file);
+			let parent = path.parent().unwrap();
+
+			std::fs::create_dir_all(parent).unwrap();
+			image.save_with_format(path, image::ImageFormat::Png).unwrap();
+		}
 	} else if command.contains("am force-stop") {
 		terminate();
 	}
-}
 
+	if *DEBUG {
+		let mut log = OpenOptions::new().create(true).append(true).open("playbridge.log").unwrap();
+		_ = writeln!(log, "[{}] {}", timestamp, command);
+	}
+}
 fn get_gpg_info() -> (HWND, i32, i32) {
-	let hwnd = unsafe { FindWindowW(CLASS, TITLE) };
+	let hwnd = unsafe { FindWindowW(CLASS, *TITLE) }.unwrap();
 
 	let mut client_rect = RECT::default();
 	_ = unsafe { GetClientRect(hwnd, &mut client_rect) };
@@ -84,8 +108,8 @@ fn input_tap(x: i32, y: i32) {
 	let pos = get_relative_point(x, y, w, h);
 
 	unsafe {
-		_ = PostMessageA(hwnd, WM_LBUTTONDOWN, WPARAM(1), LPARAM(pos));
-		_ = PostMessageA(hwnd, WM_LBUTTONUP, WPARAM(1), LPARAM(pos));
+		_ = PostMessageA(Some(hwnd), WM_LBUTTONDOWN, WPARAM(1), LPARAM(pos));
+		_ = PostMessageA(Some(hwnd), WM_LBUTTONUP, WPARAM(1), LPARAM(pos));
 	}
 }
 
@@ -110,7 +134,7 @@ fn input_swipe(x1: i32, y1: i32, x2: i32, y2: i32, dur: i32) {
 					let nx = x1 + ((x2 - x1) as f32 * el) as i32;
 					let ny = y1 + ((y2 - y1) as f32 * el) as i32;
 					let pos = get_relative_point(nx, ny, w, h);
-					_ = PostMessageA(hwnd, WM_LBUTTONDOWN, WPARAM(1), LPARAM(pos));
+					_ = PostMessageA(Some(hwnd), WM_LBUTTONDOWN, WPARAM(1), LPARAM(pos));
 
 					spin_sleep::sleep(Duration::from_millis(sleep_ms as u64));
 				}
@@ -122,12 +146,12 @@ fn input_swipe(x1: i32, y1: i32, x2: i32, y2: i32, dur: i32) {
 
 		// post end position up
 		let pos = get_relative_point(x2, y2, w, h);
-		_ = PostMessageA(hwnd, WM_LBUTTONUP, WPARAM(1), LPARAM(pos));
+		_ = PostMessageA(Some(hwnd), WM_LBUTTONUP, WPARAM(1), LPARAM(pos));
 	}
 }
 
 fn input_keyevent(keycode: i32) {
-	let hwnd = unsafe { FindWindowW(CLASS, TITLE) };
+	let hwnd = Some(unsafe { FindWindowW(CLASS, *TITLE) }.unwrap());
 
 	let wparam = WPARAM(keycode as usize);
 	let down = LPARAM((keycode << 16) as isize);
@@ -140,8 +164,8 @@ fn input_keyevent(keycode: i32) {
 }
 
 fn capture() -> DynamicImage {
-	let hwnd = unsafe { FindWindowW(CLASS, TITLE) };
-	let swnd = unsafe { FindWindowExA(hwnd, HWND(0), s!("subWin"), PCSTR::null()) };
+	let hwnd = unsafe { FindWindowW(CLASS, *TITLE) }.unwrap();
+	let swnd = unsafe { FindWindowExA(Some(hwnd), None, s!("subWin"), PCSTR::null()) }.unwrap();
 	
 	let mut rect = RECT::default();
 	_ = unsafe { GetWindowRect(swnd, &mut rect) };
@@ -168,16 +192,17 @@ fn capture() -> DynamicImage {
 	};
 
 	unsafe {
-		let dc = GetDC(hwnd);
-		let cdc = CreateCompatibleDC(dc);
+		let dc = GetDC(Some(hwnd));
+		let cdc = CreateCompatibleDC(Some(dc));
 		let cbmp = CreateCompatibleBitmap(dc, width, height);
+		let cbmpobj = HGDIOBJ::from(cbmp);
 
-		SelectObject(cdc, cbmp);
+		SelectObject(cdc, cbmpobj);
 		_ = PrintWindow(hwnd, cdc, PRINT_WINDOW_FLAGS(PW_CLIENTONLY.0 | PW_RENDERFULLCONTENT));
 		GetDIBits(cdc, cbmp, 0, height as u32, Some(buffer.as_mut_ptr() as *mut _), &mut info, DIB_RGB_COLORS);
 		
-		_ = DeleteObject(cbmp);
-		ReleaseDC(hwnd, dc);
+		_ = DeleteObject(cbmpobj);
+		ReleaseDC(Some(hwnd), dc);
 		_ = DeleteDC(dc);
 		_ = DeleteDC(cdc);
 	}
@@ -193,6 +218,6 @@ fn capture() -> DynamicImage {
 }
 
 fn terminate() {
-	let hwnd = unsafe { FindWindowW(CLASS, TITLE) };
-	_ = unsafe { PostMessageA(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0)) };
+	let hwnd = unsafe { FindWindowW(CLASS, *TITLE) }.unwrap();
+	_ = unsafe { PostMessageA(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0)) };
 }
