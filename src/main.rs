@@ -7,13 +7,6 @@ use windows::{
 	core::*, Win32::{Foundation::*, Graphics::Gdi::*, Storage::Xps::*, UI::HiDpi::*, UI::WindowsAndMessaging::*}
 };
 
-const TITLE: Lazy<PCWSTR> = Lazy::new(|| {
-	let var = env::var("PLAYBRIDGE_TITLE").unwrap_or(String::from("명일방주"));
-	let vec: Vec<u16> = var.encode_utf16().chain(iter::once(0)).collect::<Vec<_>>();
-
-	PCWSTR::from_raw(vec.as_ptr())
-});
-const QUICK: Lazy<bool> = Lazy::new(|| env::var("PLAYBRIDGE_QUICK").is_ok());
 const DEBUG: Lazy<bool> = Lazy::new(|| env::var("PLAYBRIDGE_DEBUG").is_ok());
 
 const CLASS: PCWSTR = w!("CROSVM_1"); // Note: Warning. May cause problems in the future.
@@ -31,7 +24,7 @@ fn main() {
 		println!("connected to Google Play Games Beta");
 	} else if command.contains("devices") {
 		println!("List of devices attached");
-		if !unsafe { FindWindowW(CLASS, None) }.unwrap().is_invalid() {
+		if unsafe { FindWindowW(CLASS, None) } != HWND(0) {
 			println!("GooglePlayGamesBeta\tdevice")
 		}
 	} else if command.contains("shell getprop ro.build.version.release") {
@@ -40,7 +33,7 @@ fn main() {
 		let intent = args[7].parse::<String>().unwrap();
 		let package = intent.split("/").next().unwrap();
 
-		if unsafe { FindWindowW(CLASS, None) }.unwrap().is_invalid() {
+		if unsafe { FindWindowW(CLASS, None) } == HWND(0) {
 			_ = open::that(format!("googleplaygames://launch/?id={}", package));
 		}
 		
@@ -78,6 +71,9 @@ fn main() {
 			std::fs::create_dir_all(parent).unwrap();
 			image.save_with_format(path, image::ImageFormat::Png).unwrap();
 		}
+	} else if command.contains("settings get secure android_id") {
+		// https://developer.android.com/reference/android/provider/Settings.Secure#ANDROID_ID
+		println!("0000000000000000") // 64-bit hexdecimal
 	} else if command.contains("am force-stop") {
 		terminate();
 	}
@@ -88,7 +84,7 @@ fn main() {
 	}
 }
 fn get_gpg_info() -> (HWND, i32, i32) {
-	let hwnd = unsafe { FindWindowW(CLASS, None) }.unwrap();
+	let hwnd = unsafe { FindWindowW(CLASS, None) };
 
 	let mut client_rect = RECT::default();
 	_ = unsafe { GetClientRect(hwnd, &mut client_rect) };
@@ -108,8 +104,8 @@ fn input_tap(x: i32, y: i32) {
 	let pos = get_relative_point(x, y, w, h);
 
 	unsafe {
-		_ = PostMessageA(Some(hwnd), WM_LBUTTONDOWN, WPARAM(1), LPARAM(pos));
-		_ = PostMessageA(Some(hwnd), WM_LBUTTONUP, WPARAM(1), LPARAM(pos));
+		_ = PostMessageA(hwnd, WM_LBUTTONDOWN, WPARAM(1), LPARAM(pos));
+		_ = PostMessageA(hwnd, WM_LBUTTONUP, WPARAM(1), LPARAM(pos));
 	}
 }
 
@@ -134,7 +130,7 @@ fn input_swipe(x1: i32, y1: i32, x2: i32, y2: i32, dur: i32) {
 					let nx = x1 + ((x2 - x1) as f32 * el) as i32;
 					let ny = y1 + ((y2 - y1) as f32 * el) as i32;
 					let pos = get_relative_point(nx, ny, w, h);
-					_ = PostMessageA(Some(hwnd), WM_LBUTTONDOWN, WPARAM(1), LPARAM(pos));
+					_ = PostMessageA(hwnd, WM_LBUTTONDOWN, WPARAM(1), LPARAM(pos));
 
 					spin_sleep::sleep(Duration::from_millis(sleep_ms as u64));
 				}
@@ -146,12 +142,12 @@ fn input_swipe(x1: i32, y1: i32, x2: i32, y2: i32, dur: i32) {
 
 		// post end position up
 		let pos = get_relative_point(x2, y2, w, h);
-		_ = PostMessageA(Some(hwnd), WM_LBUTTONUP, WPARAM(1), LPARAM(pos));
+		_ = PostMessageA(hwnd, WM_LBUTTONUP, WPARAM(1), LPARAM(pos));
 	}
 }
 
 fn input_keyevent(keycode: i32) {
-	let hwnd = Some(unsafe { FindWindowW(CLASS, *TITLE) }.unwrap());
+	let hwnd = unsafe { FindWindowW(CLASS, None) };
 
 	let wparam = WPARAM(keycode as usize);
 	let down = LPARAM((keycode << 16) as isize);
@@ -164,8 +160,8 @@ fn input_keyevent(keycode: i32) {
 }
 
 fn capture() -> DynamicImage {
-	let hwnd = unsafe { FindWindowW(CLASS, None) }.unwrap();
-	let swnd = unsafe { FindWindowExA(Some(hwnd), None, s!("subWin"), PCSTR::null()) }.unwrap();
+	let hwnd = unsafe { FindWindowW(CLASS, None) };
+	let swnd = unsafe { FindWindowExA(hwnd, None, s!("subWin"), PCSTR::null()) };
 	
 	let mut rect = RECT::default();
 	_ = unsafe { GetWindowRect(swnd, &mut rect) };
@@ -192,8 +188,8 @@ fn capture() -> DynamicImage {
 	};
 
 	unsafe {
-		let dc = GetDC(Some(hwnd));
-		let cdc = CreateCompatibleDC(Some(dc));
+		let dc = GetDC(hwnd);
+		let cdc = CreateCompatibleDC(dc);
 		let cbmp = CreateCompatibleBitmap(dc, width, height);
 		let cbmpobj = HGDIOBJ::from(cbmp);
 
@@ -202,7 +198,7 @@ fn capture() -> DynamicImage {
 		GetDIBits(cdc, cbmp, 0, height as u32, Some(buffer.as_mut_ptr() as *mut _), &mut info, DIB_RGB_COLORS);
 		
 		_ = DeleteObject(cbmpobj);
-		ReleaseDC(Some(hwnd), dc);
+		ReleaseDC(hwnd, dc);
 		_ = DeleteDC(dc);
 		_ = DeleteDC(cdc);
 	}
@@ -218,6 +214,6 @@ fn capture() -> DynamicImage {
 }
 
 fn terminate() {
-	let hwnd = unsafe { FindWindowW(CLASS, *TITLE) }.unwrap();
-	_ = unsafe { PostMessageA(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0)) };
+	let hwnd = unsafe { FindWindowW(CLASS, None) };
+	_ = unsafe { PostMessageA(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0)) };
 }
