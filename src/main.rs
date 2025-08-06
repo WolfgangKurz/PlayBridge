@@ -74,6 +74,9 @@ fn main() {
 			std::fs::create_dir_all(parent).unwrap();
 			image.save_with_format(path, image::ImageFormat::Png).unwrap();
 		}
+	} else if command.contains("settings get secure android_id") {
+		// https://developer.android.com/reference/android/provider/Settings.Secure#ANDROID_ID
+		println!("0000000000000000") // 64-bit hexdecimal
 	} else if command.contains("am force-stop") {
 		terminate();
 	}
