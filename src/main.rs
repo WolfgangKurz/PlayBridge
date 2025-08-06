@@ -31,7 +31,7 @@ fn main() {
 		println!("connected to Google Play Games Beta");
 	} else if command.contains("devices") {
 		println!("List of devices attached");
-		if !unsafe { FindWindowW(CLASS, *TITLE) }.unwrap().is_invalid() {
+		if !unsafe { FindWindowW(CLASS, None) }.unwrap().is_invalid() {
 			println!("GooglePlayGamesBeta\tdevice")
 		}
 	} else if command.contains("shell getprop ro.build.version.release") {
@@ -40,7 +40,7 @@ fn main() {
 		let intent = args[7].parse::<String>().unwrap();
 		let package = intent.split("/").next().unwrap();
 
-		if unsafe { FindWindowW(CLASS, *TITLE) }.unwrap().is_invalid() {
+		if unsafe { FindWindowW(CLASS, None) }.unwrap().is_invalid() {
 			_ = open::that(format!("googleplaygames://launch/?id={}", package));
 		}
 		
@@ -88,7 +88,7 @@ fn main() {
 	}
 }
 fn get_gpg_info() -> (HWND, i32, i32) {
-	let hwnd = unsafe { FindWindowW(CLASS, *TITLE) }.unwrap();
+	let hwnd = unsafe { FindWindowW(CLASS, None) }.unwrap();
 
 	let mut client_rect = RECT::default();
 	_ = unsafe { GetClientRect(hwnd, &mut client_rect) };
@@ -164,7 +164,7 @@ fn input_keyevent(keycode: i32) {
 }
 
 fn capture() -> DynamicImage {
-	let hwnd = unsafe { FindWindowW(CLASS, *TITLE) }.unwrap();
+	let hwnd = unsafe { FindWindowW(CLASS, None) }.unwrap();
 	let swnd = unsafe { FindWindowExA(Some(hwnd), None, s!("subWin"), PCSTR::null()) }.unwrap();
 	
 	let mut rect = RECT::default();
