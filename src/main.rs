@@ -7,11 +7,21 @@ use windows::{
 	core::*, Win32::{Foundation::*, Graphics::Gdi::*, Storage::Xps::*, UI::HiDpi::*, UI::WindowsAndMessaging::*}
 };
 
+const TITLE_BASE: Lazy<String> = Lazy::new(|| {
+	env::var("PLAYBRIDGE_TITLE").unwrap_or(String::from("명일방주"))
+});
 const TITLE: Lazy<PCWSTR> = Lazy::new(|| {
-	let var = env::var("PLAYBRIDGE_TITLE").unwrap_or(String::from("명일방주"));
-	let vec: Vec<u16> = var.encode_utf16().chain(iter::once(0)).collect::<Vec<_>>();
-
-	PCWSTR::from_raw(vec.as_ptr())
+	PCWSTR::from_raw(
+		Box::leak( // Note: to prevent dangling pointer usage
+			(*TITLE_BASE).encode_utf16().chain(iter::once(0)).collect::<Vec<_>>().into_boxed_slice()
+		).as_ptr()
+	)
+});
+const TITLE_PREFIX: Lazy<&'static [u16]> = Lazy::new(|| {
+	Box::leak( // Note: to prevent dangling pointer usage
+		(*TITLE_BASE).encode_utf16().collect::<Vec<_>>().into_boxed_slice()
+		// Prefix check will not use Win-API, so NULL terminator not needed
+	)
 });
 const QUICK: Lazy<bool> = Lazy::new(|| env::var("PLAYBRIDGE_QUICK").is_ok());
 const DEBUG: Lazy<bool> = Lazy::new(|| env::var("PLAYBRIDGE_DEBUG").is_ok());
@@ -36,7 +46,7 @@ fn main() {
 		let intent = args[7].parse::<String>().unwrap();
 		let package = intent.split("/").next().unwrap();
 
-		if unsafe { FindWindowW(CLASS, *TITLE) } == HWND(0) {
+		if get_target_window() == HWND(0) {
 			_ = open::that(format!("googleplaygames://launch/?id={}", package));
 		}
 		
@@ -88,7 +98,7 @@ fn main() {
 }
 
 fn get_gpg_info() -> (HWND, i32, i32) {
-	let hwnd = unsafe { FindWindowW(CLASS, *TITLE) };
+	let hwnd = get_target_window();
 
 	let mut client_rect = RECT::default();
 	_ = unsafe { GetClientRect(hwnd, &mut client_rect) };
@@ -145,7 +155,7 @@ fn input_swipe(x1: i32, y1: i32, x2: i32, y2: i32, dur: i32) {
 }
 
 fn input_keyevent(keycode: i32) {
-	let hwnd = unsafe { FindWindowW(CLASS, *TITLE) };
+	let hwnd = get_target_window();
 
 	let wparam = WPARAM(keycode as usize);
 	let down = LPARAM((keycode << 16) as isize);
@@ -158,7 +168,7 @@ fn input_keyevent(keycode: i32) {
 }
 
 fn capture() -> DynamicImage {
-	let hwnd = unsafe { FindWindowW(CLASS, *TITLE) };
+	let hwnd = get_target_window();
 	let swnd = unsafe { FindWindowExA(hwnd, HWND(0), s!("subWin"), PCSTR::null()) };
 	
 	let mut rect = RECT::default();
@@ -211,6 +221,34 @@ fn capture() -> DynamicImage {
 }
 
 fn terminate() {
-	let hwnd = unsafe { FindWindowW(CLASS, *TITLE) };
+	let hwnd = get_target_window();
 	_ = unsafe { PostMessageA(hwnd, WM_CLOSE, WPARAM(0), LPARAM(0)) };
+}
+
+fn get_target_window() -> HWND {
+	let mut hwnd = unsafe { FindWindowW(CLASS, *TITLE) };
+	if hwnd != HWND(0) {
+		return hwnd
+	}
+
+	loop {
+		hwnd = unsafe { FindWindowExW(HWND(0), hwnd, CLASS, PCWSTR::null()) };
+		if hwnd == HWND(0) { // Not found
+			break
+		}
+
+		let mut buf = [0u16; 260]; // Long enough
+		unsafe {
+			let len_title = GetWindowTextW(hwnd, &mut buf);
+			if len_title <= 0 {
+				continue
+			}
+
+			let title = &buf[..len_title as usize];
+			if title.starts_with(*TITLE_PREFIX) { // Compare buffer directly
+				return hwnd
+			}
+		}
+	}
+	HWND(0)
 }
