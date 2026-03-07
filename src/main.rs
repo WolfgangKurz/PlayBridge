@@ -26,8 +26,6 @@ const TITLE_PREFIX: Lazy<&'static [u16]> = Lazy::new(|| {
 const QUICK: Lazy<bool> = Lazy::new(|| env::var("PLAYBRIDGE_QUICK").is_ok());
 const DEBUG: Lazy<bool> = Lazy::new(|| env::var("PLAYBRIDGE_DEBUG").is_ok());
 
-const CLASS: PCWSTR = w!("CROSVM_1"); // Note: Warning. May cause problems in the future.
-const SUBTITLE: PCWSTR = w!("crosvm");
 const WIDTH: f32 = 1280.0;
 const HEIGHT: f32 = 720.0;
 
@@ -40,11 +38,9 @@ fn main() {
 
 	if command.contains("connect") {
 		println!("connected to Google Play Games Beta");
-    } else if command.contains("identify") {
-		println!("PlayBridge custom 20260307-01");
 	} else if command.contains("devices") {
 		println!("List of devices attached");
-		if unsafe { FindWindowW(CLASS, None) } != HWND(0) {
+		if get_target_window() != HWND(0) {
 			println!("GooglePlayGamesBeta\tdevice")
 		}
 	} else if command.contains("shell getprop ro.build.version.release") {
@@ -181,7 +177,7 @@ fn input_keyevent(keycode: i32) {
 
 fn capture() -> DynamicImage {
 	let hwnd = get_target_window();
-	let swnd = unsafe { FindWindowExA(hwnd, HWND(0), s!("subWin"), PCSTR::null()) };
+	let swnd = unsafe { FindWindowExW(hwnd, HWND(0), w!("subWin"), PCWSTR::null()) };
 	
 	let mut rect = RECT::default();
 	_ = unsafe { GetWindowRect(swnd, &mut rect) };
@@ -239,6 +235,10 @@ fn terminate() {
 }
 
 fn get_target_window() -> HWND {
+	// Note: Warning. May cause problems in the future.
+	let CLASS = w!("CROSVM_1");
+	let SUBTITLE = w!("crosvm");
+
 	let mut hwnd = unsafe { FindWindowW(CLASS, *TITLE) };
 	if hwnd != HWND(0) {
 		return hwnd
@@ -284,8 +284,8 @@ fn get_target_window() -> HWND {
 					continue
 				}
 				let title = &buf[..len_title as usize];
-				if title.starts_with(*TITLE_PREFIX) { // Compare buffer directly
-					return hwnd
+				if !title.starts_with(*TITLE_PREFIX) { // Compare buffer directly
+					continue
 				}
 
 				let sub_hwnd = FindWindowExW(hwnd, HWND(0), CLASS, SUBTITLE);
