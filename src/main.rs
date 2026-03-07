@@ -27,6 +27,7 @@ const QUICK: Lazy<bool> = Lazy::new(|| env::var("PLAYBRIDGE_QUICK").is_ok());
 const DEBUG: Lazy<bool> = Lazy::new(|| env::var("PLAYBRIDGE_DEBUG").is_ok());
 
 const CLASS: PCWSTR = w!("CROSVM_1"); // Note: Warning. May cause problems in the future.
+const SUBTITLE: PCWSTR = w!("crosvm");
 const WIDTH: f32 = 1280.0;
 const HEIGHT: f32 = 720.0;
 
@@ -39,6 +40,8 @@ fn main() {
 
 	if command.contains("connect") {
 		println!("connected to Google Play Games Beta");
+    } else if command.contains("identify") {
+		println!("PlayBridge custom 20260307-01");
 	} else if command.contains("devices") {
 		println!("List of devices attached");
 		if unsafe { FindWindowW(CLASS, None) } != HWND(0) {
@@ -260,5 +263,50 @@ fn get_target_window() -> HWND {
 			}
 		}
 	}
+
+	// Maybe new-style window
+	loop {
+		hwnd = unsafe { FindWindowExW(HWND(0), hwnd, PCWSTR::null(), PCWSTR::null()) };
+		if hwnd == HWND(0) { // Not found
+			break
+		}
+
+		let mut buf = [0u16; 260]; // Long enough
+		unsafe { // check class first, "HwndWrapper[DefaultDomain;;<GUID>]"
+			let len_class = RealGetWindowClassW(hwnd, &mut buf);
+			if len_class <= 0 {
+				continue
+			}
+			let class = &buf[..len_class as usize];
+			if starts_with_utf16(class, "HwndWrapper[DefaultDomain;;") {
+				let len_title = GetWindowTextW(hwnd, &mut buf);
+				if len_title <= 0 {
+					continue
+				}
+				let title = &buf[..len_title as usize];
+				if title.starts_with(*TITLE_PREFIX) { // Compare buffer directly
+					return hwnd
+				}
+
+				let sub_hwnd = FindWindowExW(hwnd, HWND(0), CLASS, SUBTITLE);
+				if sub_hwnd != HWND(0) {
+					return sub_hwnd
+				}
+			}
+		}
+	}
+
 	HWND(0)
+}
+fn starts_with_utf16(buffer: &[u16], prefix: &str) -> bool {
+	let prefix_chars: Vec<u16> = prefix.encode_utf16().collect();
+	if prefix_chars.len() > buffer.len() {
+		return false;
+	}
+	for (i, &c) in prefix_chars.iter().enumerate() {
+		if buffer[i] != c {
+			return false;
+		}
+	}
+	true
 }
