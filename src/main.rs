@@ -26,6 +26,11 @@ const TITLE_PREFIX: Lazy<&'static [u16]> = Lazy::new(|| {
 const QUICK: Lazy<bool> = Lazy::new(|| env::var("PLAYBRIDGE_QUICK").is_ok());
 const DEBUG: Lazy<bool> = Lazy::new(|| env::var("PLAYBRIDGE_DEBUG").is_ok());
 
+// Note: Warning. May cause problems in the future.
+const CLASS: PCWSTR = w!("CROSVM_1");
+const SUBTITLE: PCWSTR = w!("crosvm");
+const OUTERCLASS: PCWSTR = w!("HwndWrapper[DefaultDomain;;");
+
 const WIDTH: f32 = 1280.0;
 const HEIGHT: f32 = 720.0;
 
@@ -235,28 +240,12 @@ fn terminate() {
 }
 
 fn get_target_window() -> HWND {
-	fn starts_with_u16(buffer: &[u16], prefix: &str) -> bool {
-		let prefix_chars: Vec<u16> = prefix.encode_utf16().collect();
-		if prefix_chars.len() > buffer.len() {
-			return false;
-		}
-		for (i, &c) in prefix_chars.iter().enumerate() {
-			if buffer[i] != c {
-				return false;
-			}
-		}
-		true
-	}
-
-	// Note: Warning. May cause problems in the future.
-	let CLASS = w!("CROSVM_1");
-	let SUBTITLE = w!("crosvm");
-
 	let mut hwnd = unsafe { FindWindowW(CLASS, *TITLE) };
 	if hwnd != HWND(0) {
 		return hwnd
 	}
 
+    // Find old-design GPG window
 	loop {
 		hwnd = unsafe { FindWindowExW(HWND(0), hwnd, CLASS, PCWSTR::null()) };
 		if hwnd == HWND(0) { // Not found
@@ -277,7 +266,7 @@ fn get_target_window() -> HWND {
 		}
 	}
 
-	// Maybe new-style window
+	// Find new-design GPG window
 	loop {
 		hwnd = unsafe { FindWindowExW(HWND(0), hwnd, PCWSTR::null(), PCWSTR::null()) };
 		if hwnd == HWND(0) { // Not found
@@ -285,19 +274,19 @@ fn get_target_window() -> HWND {
 		}
 
 		let mut buf = [0u16; 260]; // Long enough
-		unsafe { // check class first, "HwndWrapper[DefaultDomain;;<GUID>]"
+		unsafe { // check class first, outer window's is "HwndWrapper[DefaultDomain;;<GUID>]"
 			let len_class = RealGetWindowClassW(hwnd, &mut buf);
 			if len_class <= 0 {
 				continue
 			}
 			let class = &buf[..len_class as usize];
-			if starts_with_u16(class, "HwndWrapper[DefaultDomain;;") {
+			if class.starts_with(OUTERCLASS.as_wide()) {
 				let len_title = GetWindowTextW(hwnd, &mut buf);
 				if len_title <= 0 {
 					continue
 				}
 				let title = &buf[..len_title as usize];
-				if !title.starts_with(*TITLE_PREFIX) { // Compare buffer directly
+				if !title.starts_with(*TITLE_PREFIX) {
 					continue
 				}
 
