@@ -235,6 +235,19 @@ fn terminate() {
 }
 
 fn get_target_window() -> HWND {
+	fn starts_with_u16(buffer: &[u16], prefix: &str) -> bool {
+		let prefix_chars: Vec<u16> = prefix.encode_utf16().collect();
+		if prefix_chars.len() > buffer.len() {
+			return false;
+		}
+		for (i, &c) in prefix_chars.iter().enumerate() {
+			if buffer[i] != c {
+				return false;
+			}
+		}
+		true
+	}
+
 	// Note: Warning. May cause problems in the future.
 	let CLASS = w!("CROSVM_1");
 	let SUBTITLE = w!("crosvm");
@@ -278,7 +291,7 @@ fn get_target_window() -> HWND {
 				continue
 			}
 			let class = &buf[..len_class as usize];
-			if starts_with_utf16(class, "HwndWrapper[DefaultDomain;;") {
+			if starts_with_u16(class, "HwndWrapper[DefaultDomain;;") {
 				let len_title = GetWindowTextW(hwnd, &mut buf);
 				if len_title <= 0 {
 					continue
@@ -297,16 +310,4 @@ fn get_target_window() -> HWND {
 	}
 
 	HWND(0)
-}
-fn starts_with_utf16(buffer: &[u16], prefix: &str) -> bool {
-	let prefix_chars: Vec<u16> = prefix.encode_utf16().collect();
-	if prefix_chars.len() > buffer.len() {
-		return false;
-	}
-	for (i, &c) in prefix_chars.iter().enumerate() {
-		if buffer[i] != c {
-			return false;
-		}
-	}
-	true
 }
